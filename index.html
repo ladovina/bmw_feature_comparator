@@ -219,7 +219,7 @@
       errorMsg.textContent = '';
       if (!url) return;
       try {
-        const proxyUrl = 'http://localhost:8080/proxy?url=' + encodeURIComponent(url);
+        const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
         const resp = await fetch(proxyUrl);
         if (!resp.ok) throw new Error('Failed to fetch the page.');
         const html = await resp.text();
