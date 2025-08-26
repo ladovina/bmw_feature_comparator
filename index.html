@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BMW Features Comparator</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; }
+    h1 { color: #2a4d7a; }
+    .car-list { margin-bottom: 30px; }
+    .car-item { background: #fff; border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 6px; display: flex; align-items: center; }
+    .car-item span { font-weight: bold; }
+    .car-vin { color: #555; font-weight: normal; font-size: 0.95em; margin-left: 8px; }
+    .remove-btn { background: #e74c3c; color: #fff; border: none; border-radius: 4px; padding: 3px 8px; cursor: pointer; margin-left: 10px; }
+    .remove-btn:hover { background: #c0392b; }
+    .car-checkbox { margin-right: 10px; }
+    .add-form { background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 6px; margin-bottom: 30px; }
+    .add-form input, .add-form textarea { width: 100%; margin-bottom: 10px; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
+    .add-form label { font-weight: bold; }
+    .add-form button { background: #47abff; color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; }
+    .add-form button:hover { background: #2a4d7a; }
+    .error { color: #e74c3c; margin-bottom: 10px; }
+    table.comparison { width: 100%; border-collapse: collapse; background: #fff; }
+    table.comparison th, table.comparison td { border: 1px solid #ccc; padding: 6px; text-align: center; }
+    table.comparison th { background: #eaf4ff; }
+    .option-img { width: 80px; height: 45px; object-fit: cover; border-radius: 4px; border: 1px solid #ddd; }
+    .option-code { font-weight: bold; color: #2a4d7a; }
+    .note { color: #888; font-size: 0.95em; }
+    @media (max-width: 700px) {
+      table.comparison th, table.comparison td { font-size: 12px; padding: 2px; }
+      .option-img { width: 50px; height: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <h1>BMW Features Comparator</h1>
+
+  <div class="add-form">
+    <h2>Add BMW Car Equipment Link</h2>
+    <form id="addCarForm">
+      <label for="carName">Name:</label>
+      <input type="text" id="carName" placeholder="e.g. My M340i" required>
+      <label for="carUrl">Bimmer.works equipment link:</label>
+      <input type="url" id="carUrl" placeholder="https://bimmer.work/vin/.../options/" required>
+      <label for="carMobileDe">mobile.de link (optional):</label>
+      <input type="url" id="carMobileDe" placeholder="https://suchen.mobile.de/fahrzeuge/details.html?id=...">
+      <label for="carNote">Note:</label>
+      <input type="text" id="carNote" placeholder="Any note (optional)">
+      <button type="submit">Add Car</button>
+      <div class="error" id="errorMsg"></div>
+    </form>
+  </div>
+
+  <div class="car-list" id="carList"></div>
+
+  <div id="comparisonTable"></div>
+
+  <script>
+    const BASE_URL = 'https://bimmer.work';
+    const STORAGE_KEY = 'bmw_features_comparator_cars_v1';
+    const SELECTED_KEY = 'bmw_features_comparator_selected_v1';
+    let cars = [];
+    let selected = [];
+
+    function saveToStorage() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cars));
+      localStorage.setItem(SELECTED_KEY, JSON.stringify(selected));
+    }
+
+    function loadFromStorage() {
+      try {
+        const carsRaw = localStorage.getItem(STORAGE_KEY);
+        const selectedRaw = localStorage.getItem(SELECTED_KEY);
+        if (carsRaw) cars = JSON.parse(carsRaw);
+        if (selectedRaw) selected = JSON.parse(selectedRaw);
+        if (selected.length !== cars.length) {
+          selected = cars.map(() => true);
+        }
+      } catch (e) {
+        cars = [];
+        selected = [];
+      }
+    }
+
+    function parseOptionsFromDoc(doc) {
+      const rows = Array.from(doc.querySelectorAll('table tbody tr'));
+      const options = [];
+      for (const row of rows) {
+        const tds = row.querySelectorAll('td');
+        if (tds.length === 2) {
+          const img = tds[0].querySelector('img');
+          const codeMatch = tds[1].innerHTML.match(/<b>(.*?)<\/b>/);
+          const code = codeMatch ? codeMatch[1].trim() : '';
+          // Split by <br> and remove HTML tags and empty lines
+          const descLines = tds[1].innerHTML.split('<br>').map(line => line.replace(/<.*?>/g, '').trim()).filter(Boolean);
+          // Remove the code line if present
+          if (descLines.length && descLines[0].toUpperCase() === code.toUpperCase()) descLines.shift();
+          if (img && code) {
+            options.push({
+              code,
+              descLines,
+              img: img.getAttribute('src')
+            });
+          }
+        }
+      }
+      return options;
+    }
+
+    function extractVIN(doc, url) {
+      let vin = '';
+      const h4 = doc.querySelector('h4, h3, h2, h1');
+      if (h4 && h4.textContent.match(/[A-HJ-NPR-Z0-9]{17}/)) {
+        vin = h4.textContent.match(/[A-HJ-NPR-Z0-9]{17}/)[0];
+      }
+      if (!vin) {
+        // Try to get VIN from the URL (17 characters after /vin/)
+        const m = url.match(/vin\/([A-HJ-NPR-Z0-9]{17})/i);
+        if (m) vin = m[1].toUpperCase();
+      }
+      return vin;
+    }
+
+    function updateCarList() {
+      const list = document.getElementById('carList');
+      list.innerHTML = '';
+      cars.forEach((car, idx) => {
+        const div = document.createElement('div');
+        div.className = 'car-item';
+        const equipLink = car.equipmentLink || car.equipment_link || car.equipmentURL || car.equipment_url || car.url || '';
+        const vin = car.vin || '';
+        const mobileDeUrl = car.mobileDeLink || '';
+        const name = car.name || '';
+        const note = car.note || '';
+        div.innerHTML = `
+          <input type="checkbox" class="car-checkbox" data-idx="${idx}" ${selected[idx] ? 'checked' : ''}>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; width: 100%;">
+            <div><strong>Name:</strong> ${name}</div>
+            <div><strong>Equipment link:</strong> <a href="${equipLink}" target="_blank" rel="noopener">${equipLink}</a></div>
+            <div><strong>VIN:</strong> <span class="car-vin">${vin}</span></div>
+            ${mobileDeUrl ? `<div><strong>mobile.de link:</strong> <a href="${mobileDeUrl}" target="_blank" rel="noopener">${mobileDeUrl}</a></div>` : ''}
+            ${note ? `<div><strong>Note:</strong> <span class="note">${note}</span></div>` : ''}
+          </div>
+          <button class="remove-btn" data-idx="${idx}">Remove</button>`;
+        list.appendChild(div);
+      });
+      list.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          const idx = +btn.getAttribute('data-idx');
+          cars.splice(idx, 1);
+          selected.splice(idx, 1);
+          saveToStorage();
+          updateCarList();
+          updateComparisonTable();
+        };
+      });
+      list.querySelectorAll('.car-checkbox').forEach(box => {
+        box.onchange = (e) => {
+          const idx = +box.getAttribute('data-idx');
+          selected[idx] = box.checked;
+          saveToStorage();
+          updateComparisonTable();
+        };
+      });
+    }
+
+    function updateComparisonTable() {
+      const container = document.getElementById('comparisonTable');
+      const shownCars = cars.filter((_, idx) => selected[idx]);
+      if (shownCars.length === 0) {
+        container.innerHTML = '<div style="color:#888">No cars selected for comparison.</div>';
+        return;
+      }
+      const allCodes = new Set();
+      shownCars.forEach(car => car.options.forEach(opt => allCodes.add(opt.code)));
+      const codes = Array.from(allCodes).sort();
+      const codeInfo = {};
+      for (const car of shownCars) {
+        for (const opt of car.options) {
+          if (!codeInfo[opt.code]) codeInfo[opt.code] = opt;
+        }
+      }
+      let html = '<table class="comparison"><thead><tr><th>Option</th><th>Description</th><th>Image</th>';
+      shownCars.forEach(car => {
+        html += `<th>${car.name}<br><span style='font-size:0.9em;color:#555'>${car.vin || ''}</span></th>`;
+      });
+      html += '</tr></thead><tbody>';
+      codes.forEach(code => {
+        const opt = codeInfo[code];
+        // Compose the description cell as: <b>CODE</b><br>desc1<br>desc2...
+        let descCell = `<b>${opt.code}</b>`;
+        if (opt.descLines && opt.descLines.length) {
+          descCell += '<br>' + opt.descLines.join('<br>');
+        }
+        html += `<tr><td class="option-code">${code}</td><td>${descCell}</td><td>`;
+        if (opt.img) {
+          html += `<img class="option-img" src="${BASE_URL}${opt.img}" alt="${code}">`;
+        } else {
+          html += '';
+        }
+        html += '</td>';
+        shownCars.forEach(car => {
+          const found = car.options.find(o => o.code === code);
+          html += `<td>${found ? '✔️' : ''}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    document.getElementById('addCarForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const name = document.getElementById('carName').value.trim();
+      const url = document.getElementById('carUrl').value.trim();
+      const mobileDeLink = document.getElementById('carMobileDe').value.trim();
+      const note = document.getElementById('carNote').value.trim();
+      const errorMsg = document.getElementById('errorMsg');
+      errorMsg.textContent = '';
+      if (!url) return;
+      try {
+        const proxyUrl = 'http://localhost:8080/proxy?url=' + encodeURIComponent(url);
+        const resp = await fetch(proxyUrl);
+        if (!resp.ok) throw new Error('Failed to fetch the page.');
+        const html = await resp.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const options = parseOptionsFromDoc(doc);
+        if (!options.length) throw new Error('No options found on the page.');
+        let vin = extractVIN(doc, url);
+        if (!vin) {
+          const m = url.match(/vin\/([A-HJ-NPR-Z0-9]{17})/i);
+          if (m) vin = m[1].toUpperCase();
+        }
+        cars.push({ name, note, options, vin, equipmentLink: url, mobileDeLink });
+        selected.push(true);
+        saveToStorage();
+        document.getElementById('carName').value = '';
+        document.getElementById('carUrl').value = '';
+        document.getElementById('carMobileDe').value = '';
+        document.getElementById('carNote').value = '';
+        updateCarList();
+        updateComparisonTable();
+      } catch (err) {
+        errorMsg.textContent = err.message || 'Error fetching or parsing the page.';
+      }
+    };
+
+    loadFromStorage();
+    updateCarList();
+    updateComparisonTable();
+  </script>
+</body>
+</html> 
