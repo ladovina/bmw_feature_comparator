@@ -110,13 +110,8 @@
     function extractVIN(doc, url) {
       let vin = '';
       const h4 = doc.querySelector('h4, h3, h2, h1');
-      if (h4 && h4.textContent.match(/[A-HJ-NPR-Z0-9]{17}/)) {
-        vin = h4.textContent.match(/[A-HJ-NPR-Z0-9]{17}/)[0];
-      }
-      if (!vin) {
-        // Try to get VIN from the URL (17 characters after /vin/)
-        const m = url.match(/vin\/([A-HJ-NPR-Z0-9]{17})/i);
-        if (m) vin = m[1].toUpperCase();
+      if (h4 && h4.textContent.match(/[a-zA-Z0-9]{17}/)) {
+        vin = h4.textContent.match(/[a-zA-Z0-9]{17}/)[0];
       }
       return vin;
     }
@@ -212,12 +207,21 @@
     document.getElementById('addCarForm').onsubmit = async function(e) {
       e.preventDefault();
       const name = document.getElementById('carName').value.trim();
-      const url = document.getElementById('carUrl').value.trim();
+      let url = document.getElementById('carUrl').value.trim();
       const mobileDeLink = document.getElementById('carMobileDe').value.trim();
       const note = document.getElementById('carNote').value.trim();
       const errorMsg = document.getElementById('errorMsg');
       errorMsg.textContent = '';
       if (!url) return;
+      
+      // Ensure we're always using the /options/ endpoint
+      // Match any bimmer.work URL with a hash parameter and redirect to /options/
+      const bimmerMatch = url.match(/bimmer\.work\/vin\/([a-zA-Z0-9]+)/i);
+      if (bimmerMatch) {
+        // Replace any other endpoints with /options/
+        url = `https://bimmer.work/vin/${bimmerMatch[1]}/options/`;
+      }
+      
       try {
         const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(url);
         const resp = await fetch(proxyUrl);
@@ -228,10 +232,6 @@
         const options = parseOptionsFromDoc(doc);
         if (!options.length) throw new Error('No options found on the page.');
         let vin = extractVIN(doc, url);
-        if (!vin) {
-          const m = url.match(/vin\/([A-HJ-NPR-Z0-9]{17})/i);
-          if (m) vin = m[1].toUpperCase();
-        }
         cars.push({ name, note, options, vin, equipmentLink: url, mobileDeLink });
         selected.push(true);
         saveToStorage();
